@@ -1,0 +1,157 @@
+---
+title: "execute_weat"
+author: "Allan Sales"
+date: "4 de dezembro de 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("dplyr")
+library("wordVectors")
+source("weat.R")
+```
+
+## Carrega modelos de palavras
+```{r}
+we_estadao_noticias = read.binary.vectors("embeddings/eleicoes_2014_estadao.bin")
+we_folha_noticias = read.binary.vectors("embeddings/eleicoes_2014_folha.bin")
+we_folha_comentarios = read.binary.vectors("embeddings/folha_comentarios_eleicao_2014.bin")
+```
+
+## Verifica se todas as palavras dos dataframes estao contidas no modelo
+```{r}
+modelo_contem_palavra <- function(features, targets, modelo){
+
+  checa_palavra_em_modelo <- function(w, modelo){
+    wv = modelo[[w]]
+    contem = (is.nan(wv[1,1]) == F) #se vetor contem nan, entao nao existe a palavra no modelo
+    return(contem)
+  }
+
+  ok_a = features %>% group_by(get("A")) %>% summarise(palavras_do_modelo = checa_palavra_em_modelo(get("A"), modelo))
+  ok_b = features %>% group_by(get("B")) %>% summarise(palavras_do_modelo = checa_palavra_em_modelo(get("B"), modelo))
+
+  ok_x = targets %>% group_by(get("X")) %>% summarise(palavras_do_modelo = checa_palavra_em_modelo(get("X"), modelo))
+  ok_y = targets %>% group_by(get("Y")) %>% summarise(palavras_do_modelo = checa_palavra_em_modelo(get("Y"), modelo))
+
+  all_true_a = (ok_a %>% distinct(palavras_do_modelo) %>% nrow() == 1 && ok_a %>% distinct(palavras_do_modelo) == T)
+  if(!all_true_a){
+    print(ok_a)
+  }
+  
+  all_true_b = (ok_b %>% distinct(palavras_do_modelo) %>% nrow() == 1 && ok_b %>% distinct(palavras_do_modelo) == T)
+  if(!all_true_b){
+    print(ok_b)
+  }
+  
+  all_true_x = (ok_x %>% distinct(palavras_do_modelo) %>% nrow() == 1 && ok_x %>% distinct(palavras_do_modelo) == T)
+  if(!all_true_x){
+    print(ok_x)
+  }
+  
+  all_true_y = (ok_y %>% distinct(palavras_do_modelo) %>% nrow() == 1 && ok_y %>% distinct(palavras_do_modelo) == T)
+  if(!all_true_y){
+    print(ok_y)
+  }
+  
+  all_true = ((all_true_a && all_true_b) && (all_true_x && all_true_y))
+  return(all_true)
+}
+```
+
+## Verifica se todas as palavras estao contidas no vocabulario dos portais
+```{r}
+potal_contem_palavras <- function(x, y, a, b){
+  targets = data_frame(X = x, Y = y)
+  features = data_frame(A = a, B = b)
+
+  print(modelo_contem_palavra(features, targets, we_estadao_noticias))
+  print(modelo_contem_palavra(features, targets, we_folha_noticias))
+  print(modelo_contem_palavra(features, targets, we_folha_comentarios))
+}
+
+calcula_scores_portais <- function(x, y, a, b){
+  permutacoes = permutacao(x, y)
+  score_Xi_Yi_estadao_noticias = score_permutacoes(permutacoes$Xi, permutacoes$Yi, a, b, we_estadao_noticias)
+  score_Xi_Yi_folha_noticias = score_permutacoes(permutacoes$Xi, permutacoes$Yi, a, b, we_folha_noticias)
+  score_Xi_Yi_folha_comentarios = score_permutacoes(permutacoes$Xi, permutacoes$Yi, a, b, we_folha_comentarios)
+
+  scores = bind_cols(permutacoes$Xi, permutacoes$Yi, score_estadao = score_Xi_Yi_estadao_noticias, score_folha = score_Xi_Yi_folha_noticias, score_folha_comentarios = score_Xi_Yi_folha_comentarios)
+  return(scores)
+}
+
+execute <- function(x, y, a, b){
+  
+  scores = calcula_scores_portais(x, y, a, b)
+
+  score_X_Y_estadao_noticias = score_targets(x, y, a, b, we_estadao_noticias)
+  p_estadao = pvalor(scores$score_estadao, score_X_Y_estadao_noticias)
+  e_estadao = effect_size(x, y, a, b, we_estadao_noticias)
+
+  score_X_Y_folha_noticias = score_targets(x, y, a, b, we_folha_noticias)
+  p_folhan = pvalor(scores$score_folha, score_X_Y_folha_noticias)
+  e_folhan = effect_size(x, y, a, b, we_folha_noticias)
+
+  score_X_Y_folha_comentarios = score_targets(x, y, a, b, we_folha_comentarios)
+  p_folhac = pvalor(scores$score_folha_comentarios, score_X_Y_folha_comentarios)
+  e_folhac = effect_size(x, y, a, b, we_folha_comentarios)
+  
+  valores = data_frame(fonte = c("Noticias estadao", "Noticias folha", "Comentarios folha"), p_valor = c(p_estadao, p_folhan, p_folhac), tam_efeito = c(e_estadao, e_folhan, e_folhac))
+  
+  return(list(valores = valores, scores = scores))
+}
+```
+
+## Conjuntos de palavras
+### candidatos x coligacoes
+```{r}
+# x, y = target, a, b = atributo
+# divisao por partidos
+x = c("dilma", "rousseff", "lula", "pt", "temer")
+y = c("aécio", "neves", "fhc", "psdb", "aloysio")
+a = c("pmdb", "psd", "pp", "pr", "pdt", "pros", "pcdob") 
+b = c("sd", "pmn", "pen", "ptn", "ptc", "dem", "ptb")
+
+potal_contem_palavras(x, y, a, b)
+candidatos_coligacoes = execute(x, y, a, b)
+candidatos_coligacoes$valores
+```
+
+### candidatos x temporario - permanente
+```{r}
+x = c("dilma", "rousseff", "lula", "pt", "temer")
+y = c("aécio", "neves", "fhc", "psdb", "aloysio")
+a = c("estável", "sempre", "longo", "constante", "persistência")
+b = c("instável", "variável", "curto", "breve", "passagem")
+
+potal_contem_palavras(x, y, a, b)
+candidatos_tempo = execute(x, y, a, b)
+```
+
+### candidatos x prazer
+```{r}
+x = c("dilma", "rousseff", "lula", "pt", "temer")
+y = c("aécio", "neves", "fhc", "psdb", "aloysio")
+a = c("carinho", "liberdade", "saúde", "amor", "paz", "alegria", "fiel", "honesto", "sorte", "diploma", "presente", "honra", "família", "feliz", "férias")
+b = c("abuso", "quebra", "doença", "acidente", "sofrimento", "assalto", "desastre", "ódio", "tragédia", "cadeia", "pobreza", "feio", "câncer", "morte", "prisão")
+
+potal_contem_palavras(x, y, a, b)
+candidatos_prazer = execute(x, y, a, b)
+candidatos_prazer$valores
+```
+
+### Vies de genero x posicionamento politico
+```{r}
+x = c("dilma", "rousseff", "luciana", "genro", "marina", "silva")
+y = c("aécio", "neves", "eduardo", "jorge", "levy", "fidelix")
+a = c("pt", "psb", "psd", "pdt", "pps", "pcdob", "psd", "pcdob","psol")
+b = c("psdb", "pp", "pr", "prb", "pros", "prtb", "phs", "pen", "dem")
+
+potal_contem_palavras(x, y, a, b)
+genero_posicao = execute(x, y, a, b)
+genero_posicao$valores
+```
+
